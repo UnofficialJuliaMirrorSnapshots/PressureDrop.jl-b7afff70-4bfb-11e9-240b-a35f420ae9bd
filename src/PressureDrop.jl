@@ -8,8 +8,8 @@ using Requires
 
 import Base.show #to export Wellbore printing method
 
-export  Wellbore, traverse_topdown, read_survey, pressure_and_temp,
-        plot_pressure, plot_temperature, plot_pressureandtemp,
+export  Wellbore, traverse_topdown, casing_traverse_topdown, read_survey, pressure_and_temp,
+        plot_pressure, plot_gaslift_pressures, plot_temperature, plot_pressureandtemp, plot_gaslift,
         BeggsAndBrill,
         HagedornAndBrown,
         Shiu_wellboretemp, Ramey_temp, Shiu_Beggs_relaxationfactor, linear_wellboretemp,
@@ -87,8 +87,14 @@ Base.show(io::IO, well::Wellbore) = print(io,
 
 include("pvtproperties.jl")
 include("pressurecorrelations.jl")
+include("casingcalculations.jl")
 include("tempcorrelations.jl")
 include("utilities.jl")
+
+
+function __init__()
+    @require Gadfly = "c91e804a-d5a3-530f-b6f0-dfbca275c004" include("plottingfunctions.jl")
+end
 
 
 """
@@ -140,8 +146,6 @@ function calculate_pressuresegment_topdown(pressurecorrelation::Function, p_init
         dp_est = dp_calc
         p_avg = p_initial + dp_est/2
 
-        P_pc = pseudocrit_pressure_correlation(sg_gas, molFracCO2, molFracH2S)
-        _, T_pc, _ = pseudocrit_temp_correlation(sg_gas, molFracCO2, molFracH2S)
         Z = Z_correlation(P_pc, T_pc, p_avg, t_avg)
         ρ_g = gasDensity_insitu(sg_gas, Z, p_avg, t_avg)
         B_g = gasVolumeFactor(p_avg, Z, t_avg)
@@ -328,8 +332,7 @@ function pressure_and_temp(;well::Wellbore, roughness, temperature_method = "lin
     return pressures, temps
 end
 
-function __init__()
-    @require Gadfly = "c91e804a-d5a3-530f-b6f0-dfbca275c004" include("plottingfunctions.jl")
-end
+
+# derate tubing temp by 10-15% to get casing temp--set this as a default
 
 end #module PressureDrop
