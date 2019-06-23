@@ -1,35 +1,5 @@
 using PrettyTables
 
-#TODO: docs
-"""
-Indicate orifice valves with an R-value and PTRO of 0.
-"""
-struct GasliftValves
-
-    md::Array{Float64,1}
-    PTRO::Array{Float64,1}
-    R::Array{Float64,1}
-    port::Array{Int8,1}
-
-    function GasliftValves(md::Array, PTRO::Array, R::Array, port::Array)
-
-        ports = try
-            convert(Array{Int8,1}, port)
-        catch
-            throw(ArgumentError("Specify port sizes in integer 64ths inches, e.g. 16 for a quarter-inch port."))
-        end
-
-        if any(R .> 1) || any(R .< 0)
-            throw(ArgumentError("R-values are the area ratio of the port to the bellows and must be in [0, 1]."))
-        elseif any(R .> 0.2)
-            @info "Large R-value(s) entered--validate valve entry data."
-        end
-
-        new(convert(Array{Float64,1}, md), convert(Array{Float64,1}, PTRO), convert(Array{Float64,1}, R), ports)
-    end
-end
-
-
 """
 ThornhillCraver_gaspassage_simplified(P_td, P_cd, T_cd, portsize_64ths)
 
@@ -38,8 +8,8 @@ Thornhill-Craver gas throughput for square-edged orifice (optimistic since it as
 This simplified version assumes gas specific gravity at 0.65.
 
 # Arguments
-- `P_td`: tubing pressure at depth, **psia**
-- `P_cd`: casing pressure at depth, psia
+- `P_td`: tubing pressure at depth, **psig**
+- `P_cd`: casing pressure at depth, **psig**
 - `T_cd`: gas (casing fluid) temperature at depth, °F
 - `portsize_64ths`: valve port size in 64ths inch
 """
@@ -48,6 +18,9 @@ function ThornhillCraver_gaspassage_simplified(P_td, P_cd, T_cd, portsize_64ths)
     if P_td > P_cd
         return 0
     end
+
+    P_td += pressure_atmospheric
+    P_cd += pressure_atmospheric
 
     A_p = π * (portsize_64ths/128)^2 #port area, in²
 
@@ -67,8 +40,8 @@ See section 8.1 of *Fundamentals of Gas Lift Engineering* by Ali Hernandez, as w
 In general, T-C will be optimistic, but should be expected to have an effective error of up to +/- 30%.
 
 # Arguments
-- `P_td`: tubing pressure at depth, **psia**
-- `P_cd`: casing pressure at depth, psia
+- `P_td`: tubing pressure at depth, **psig**
+- `P_cd`: casing pressure at depth, **psig**
 - `T_cd`: gas (casing fluid) temperature at depth, °F
 - `portsize_64ths`: valve port size in 64ths inch
 - `sg_gas`: gas specific gravity relative to air
@@ -84,6 +57,9 @@ function ThornhillCraver_gaspassage(P_td, P_cd, T_cd, portsize_64ths,
     if P_td > P_cd
         return 0
     end
+
+    P_td += pressure_atmospheric
+    P_cd += pressure_atmospheric
 
     k = 1.27 #assumed value for Cp_Cv; if a more precise solution is needed later, see SPE 150808 "Specific Heat Capacity of Natural Gas; Expressed as a Function of ItsSpecific gravity and Temperature" by Kareem Lateef et al
 
@@ -116,7 +92,7 @@ end
 """
 domepressure_downhole(p_d_set, T_v, error_tolerance = 0.1, p_d_est = p_d_set/0.9, T_set = 60, Zfactor::Function = SageAndLacy_nitrogen_Zfactor)
 
-Iteratively calculates the dome pressure of the valve downhole using gas equation of state, assuming that the change in dome volume is negligible.
+Iteratively calculates the dome pressure **in psia** of the valve downhole using gas equation of state, assuming that the change in dome volume is negligible.
 
 # Arguments
 
@@ -130,7 +106,7 @@ Iteratively calculates the dome pressure of the valve downhole using gas equatio
 """
 function domepressure_downhole(PTRO, R, T_v, error_tolerance = 0.1, delta_est = 1.1, T_set = 60, Zfactor::Function = SageAndLacy_nitrogen_Zfactor)
 
-    p_d_set = (PTRO + 14.65) * (1 - R)
+    p_d_set = (PTRO + pressure_atmospheric) * (1 - R)
     p_d_est = p_d_set * delta_est
     p_d = Zfactor(p_d_est, T_v) / Zfactor(p_d_set, T_set) * (T_v + 459.67) * p_d_set / 520
 
@@ -143,36 +119,50 @@ function domepressure_downhole(PTRO, R, T_v, error_tolerance = 0.1, delta_est = 
 end
 
 
-#TODO: clean doc
 """
+valve_calcs(<named args>)
 
-**CAUTION**: All inputs are in psia, but PSO/PSCs are returned in psig for ease of interpretation.
+Note that all inputs and outputs are in **psig** for ease of interpretation.
 
-All forms are derived from the force balance for opening, P_t * A_p + P_c * (A_d - A_p) ≥ P_d * A_d
+Additionally, all forms are derived from the force balance for opening, P_t * A_p + P_c * (A_d - A_p) ≥ P_d * A_d
     and the force balance for closing, P_c ≤ P_d.
 
-Note that:
+Further note that:
 - the valve closing pressures given are a theoretical minimum (casing pressure is assumed to act on the entire area of the bellows/dome until closing).
 - valve opening and closing pressures are recalculated from PTRO and current conditions, rather than the other way around common during design.
-- casing temperature is adjusted from tubing temperature if only a tubing temperature profile is provided. **To force the use of identical temperature profiles, pass the tubing temperature twice.**
+- casing temperature is assumed to be 85% of tubing temperature if only a tubing temperature profile is provided. **To force the use of identical temperature profiles, pass the wellbore temperature twice.**
+
+# Arguments
+- `valves::GasliftValves`: a GasliftValves object defining the valve string
+- `well::Wellbore`: a Wellbore object defining the survey/segmentation points, deviation survey, and tubing
+- `sg_gas`: injection gas specific gravity
+- `tubing_pressures::Array{T, 1} where T <: Real`: precalculated tubing pressures in **psig**
+- `casing_pressures::Array{T, 1} where T <: Real`: precalculated casing pressures in **psig**
+- `tubing_temps::Array{T, 1} where T <: Real`: precalculated tubing temperature profile in °F
+- `casing_temps::Array{T, 1} where T <: Real = tubing_temps .* 0.85`: precalculated casing temperature profile in °F
+- `dp_min = 100`: minimum differential pressure (CP - TP) in psi for calculating an assumed injection point
+- `one_inch_coefficient = 0.76`: coefficient of discharge for Thornhill-Craver gas passage calculations for 1" valves
+- `one_pt_five_inch_coefficient = 0.6`: coefficient of discharge for Thornhill-Craver gas passage calculations for 1.5" valves
 """
-function valve_calcs(valves::GasliftValves, well::Wellbore, sg_gas, tubing_pressures::Array{T, 1} where T <: Real, casing_pressures::Array{T, 1} where T <: Real,
+function valve_calcs(;valves::GasliftValves, well::Wellbore, sg_gas, tubing_pressures::Array{T, 1} where T <: Real, casing_pressures::Array{T, 1} where T <: Real,
                     tubing_temps::Array{T, 1} where T <: Real, casing_temps::Array{T, 1} where T <: Real = tubing_temps .* 0.85,
                     dp_min = 100, one_inch_coefficient = 0.76, one_pt_five_inch_coefficient = 0.6)
 
     interp_values = interpolate_all(well, [tubing_pressures, casing_pressures, tubing_temps, casing_temps, well.tvd], valves.md)
 
-    P_td = interp_values[:,1] #tubing pressure at depth
-    P_cd = interp_values[:,2] #casing pressure at depth
+    P_td = interp_values[:,1] #tubing pressure at depth, psig
+    P_cd = interp_values[:,2] #casing pressure at depth, psig
 
     T_td = interp_values[:,3] #temp of tubing fluid at depth
     T_cd = interp_values[:,4] #temp of casing fluid at depth
 
     valve_temps = 0.7 .* T_cd .+ 0.3 .* T_td # Faustinelli, J.G. 1997
 
-    PVC = P_bd = domepressure_downhole.(valves.PTRO, valves.R, valve_temps) #dome/bellows pressure at depth; equals valve closing pressure at depth
+    P_bd = domepressure_downhole.(valves.PTRO, valves.R, valve_temps) #dome/bellows pressure at depth; in psia equals valve closing pressure at depth
+    PVC = P_bd .- pressure_atmospheric #convert to psig
 
-    PVO = (P_bd .- (P_td .* valves.R)) ./ (1 .- valves.R) #valve opening pressure at depth
+    PVO = (P_bd .- ((P_td .+ pressure_atmospheric) .* valves.R)) ./ (1 .- valves.R) #valve opening pressure at depth
+    PVO = PVO .- pressure_atmospheric #convert to psig
 
     csg_diffs = P_cd .- casing_pressures[1] #casing differential to depth
     PSC = PVC .- csg_diffs
@@ -185,7 +175,8 @@ function valve_calcs(valves::GasliftValves, well::Wellbore, sg_gas, tubing_press
     PPEF = valves.R ./ (1 .- valves.R) .* 100 #production pressure effect factor
 
     # returns PSOs in psig to avoid confusion
-    valvetable = hcat(GLV_numbers, valves.md, interp_values[:,5], PSO .- 14.65, PSC .- 14.65, valves.port, valves.R, PPEF, valves.PTRO,
+    # NOTE: plot_valves in plottingfunctions.jl depends on the column order of this table for PVO/PVC
+    valvedata = hcat(GLV_numbers, valves.md, interp_values[:,5], PSO, PSC, valves.port, valves.R, PPEF, valves.PTRO,
                 P_td, P_cd, PVO, PVC, T_td, T_cd, T_C, T_C * one_inch_coefficient, T_C * one_pt_five_inch_coefficient)
 
     #lowest valve where PVO <= CP && PVC > CP && R-value != 0
@@ -200,16 +191,18 @@ function valve_calcs(valves::GasliftValves, well::Wellbore, sg_gas, tubing_press
     end
     injection_depth = valves.md[active_valve_row]
 
-    return valvetable, injection_depth
+    return valvedata, injection_depth
 end
 
 
-#TODO: add doc
 """
+valve_table(valvedata, injection_depth = nothing)
+
+Pretty prints the data returned by `valve_calcs` for interpretation.
 """
-function valve_table(valvedata, injection_depth)
+function valve_table(valvedata, injection_depth = nothing)
     header = ["GLV" "MD" "TVD" "PSO" "PSC" "Port" "R" "PPEF" "PTRO" "TP" "CP" "PVO" "PVC" "T_td" "T_cd" "Q_o" "Q_1.5" "Q_1";
-                "" "ft" "ft" "psig" "psig" "64ths" "" "%" "psig" "psia" "psia" "psia" "psia" "°F" "°F" "mcf/d" "mcf/d" "mcf/d"]
+                "" "ft" "ft" "psig" "psig" "64ths" "" "%" "psig" "psig" "psig" "psig" "psig" "°F" "°F" "mcf/d" "mcf/d" "mcf/d"]
 
     operating_valve = Highlighter((data, i, j) -> (data[i,2] == injection_depth), crayon"bg:dark_gray white bold")
 

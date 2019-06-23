@@ -1,4 +1,6 @@
-# PressureDrop.jl [![Build Status](https://travis-ci.org/jnoynaert/PressureDrop.jl.svg?branch=master)](https://travis-ci.org/jnoynaert/PressureDrop.jl)
+# PressureDrop.jl
+[![Build Status](https://travis-ci.org/jnoynaert/PressureDrop.jl.svg?branch=master)](https://travis-ci.org/jnoynaert/PressureDrop.jl) [![Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://jnoynaert.github.io/PressureDrop.jl/stable)]
+
 Julia package for computing multiphase pressure profiles for gas lift optimization of oil &amp; gas wells.
 
 Currently calculates outlet-referenced models for producing wells using non-coupled temperature gradients.
@@ -36,13 +38,17 @@ julia> plot_pressureandtemp(example_well, pressures, temps) #expect a long time 
 ![example plot](examples/exampleplot.png)
 
 
+## Core functions
+
+TODO: list the key output functions with comments on their usage
+
 # Supported pressure correlations
 
 - Beggs and Brill, with the Payne correction factors. Best for inclined pipe.
 - Hagedorn and Brown, with the Griffith and Wallis bubble flow adjustment.
 - Casing (injection) pressure drops using corrected density but neglecting friction.
 
-Neither correlation accounts for oil-water phase slip. Both assume **steady-state conditions**.
+These methods do not account for oil-water phase slip and assume **steady-state conditions**.
 
 # Performance
 
